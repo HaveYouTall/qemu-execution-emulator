@@ -1,4 +1,22 @@
 ===========
+Forked QEMU
+===========
+
+## What is this repo designed for?
+
+This repo will serve as gadget for CACOMPARE reproducing.
+
+The paper link is: https://gosec.sjtu.edu.cn/wp-content/uploads/2021/05/ICPC2017Hu.pdf
+
+## TODO:
+
+- Read Values from reg in the runtime.
+- Read Values from mem in the runtime.
+- Recognize the Comparison Operands and Condition Codes in the runtime.
+- Control the input values according to Arguement  
+
+
+===========
 QEMU README
 ===========
 

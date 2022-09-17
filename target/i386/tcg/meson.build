@@ -9,7 +9,10 @@ i386_ss.add(when: 'CONFIG_TCG', if_true: files(
   'mpx_helper.c',
   'seg_helper.c',
   'tcg-cpu.c',
-  'translate.c'), if_false: files('tcg-stub.c'))
+  'translate.c',
+  'hyt-tcg-instrumenting.c',
+  ), if_false: files('tcg-stub.c'))
 
 subdir('sysemu')
 subdir('user')
+

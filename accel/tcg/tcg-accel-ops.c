@@ -64,6 +64,7 @@ int tcg_cpus_exec(CPUState *cpu)
     ti = profile_getclock();
 #endif
     cpu_exec_start(cpu);
+    // printf("HYT defined\n"); // NOT HERE
     ret = cpu_exec(cpu);
     cpu_exec_end(cpu);
 #ifdef CONFIG_PROFILER

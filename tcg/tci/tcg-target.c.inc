@@ -592,13 +592,17 @@ static void tcg_out_call(TCGContext *s, const tcg_insn_unit *func,
         case glue(glue(INDEX_op_, x), _i32):
 # define CASE_64(x)
 #endif
-
+// int i = 0;
 static void tcg_out_op(TCGContext *s, TCGOpcode opc,
                        const TCGArg args[TCG_MAX_OP_ARGS],
                        const int const_args[TCG_MAX_OP_ARGS])
 {
     TCGOpcode exts;
-
+    // if(i<20) {
+    //     printf("do out here\n");
+    //     i++;
+    // }
+    
     switch (opc) {
     case INDEX_op_exit_tb:
         tcg_out_op_p(s, opc, (void *)args[0]);

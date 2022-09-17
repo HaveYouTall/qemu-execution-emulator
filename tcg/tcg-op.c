@@ -113,6 +113,7 @@ void tcg_gen_addi_i32(TCGv_i32 ret, TCGv_i32 arg1, int32_t arg2)
         tcg_gen_mov_i32(ret, arg1);
     } else {
         tcg_gen_add_i32(ret, arg1, tcg_constant_i32(arg2));
+        // printf("do add res reg: %lx\n", (uint64_t)tcgv_i32_arg(arg1));
     }
 }
 
@@ -2831,6 +2832,7 @@ static void gen_ldst_i32(TCGOpcode opc, TCGv_i32 val, TCGv addr,
                          MemOp memop, TCGArg idx)
 {
     MemOpIdx oi = make_memop_idx(memop, idx);
+    // printf("%d\n", (uint32_t)(oi));
 #if TARGET_LONG_BITS == 32
     tcg_gen_op3i_i32(opc, val, addr, oi);
 #else

@@ -197,16 +197,46 @@ static bool maybe_handle_vm86_trap(CPUX86State *env, int trapnr)
     return false;
 }
 
+// ================== HYT ADDED =================
+#define HYT_INSTRUMENT
+#ifdef HYT_INSTRUMENT
+#include "../../target/i386/tcg/hyt-tcg-instrumenting.h"
+#endif
+// ==============================================
 void cpu_loop(CPUX86State *env)
 {
+// ================== HYT ADDED =================
+#ifdef HYT_INSTRUMENT
+    // instrumenting_init();
+#endif
+// ================== HYT ADDED =================
     CPUState *cs = env_cpu(env);
     int trapnr;
     abi_ulong pc;
     abi_ulong ret;
-
     for(;;) {
+        // cs->env_ptr->regs[0] = (target_ulong) 0;
         cpu_exec_start(cs);
+        // printf("HYT defined\n");
+        // printf("+ eip: 0x%lx \n", (unsigned long)env->eip);
+        
         trapnr = cpu_exec(cs);
+        // ================== HYT ADDED =================
+        #ifdef HYT_INSTRUMENT
+            show_info();
+            if(trapnr == INSTRUMENT) {
+                // change reg.
+                continue;
+            }
+        #endif
+        // ==============================================
+        // printf("- ret value 0x%lx \n", (unsigned long)cs->env_ptr->regs[R_EAX]);
+        // printf("* ret value 0x%lx \n", (unsigned long)env->regs[R_EAX]);
+        
+        // FILE *hyt = fopen("/seagate/hyt/binary-sim/test/env_regs_test/cpu_exec.txt", "a");
+        // cpu_dump_state(cs, hyt, 0);
+        // fclose(hyt);
+
         cpu_exec_end(cs);
         process_queued_cpu_work(cs);
 
@@ -314,6 +344,12 @@ void cpu_loop(CPUX86State *env)
         }
         process_pending_signals(env);
     }
+// ================== HYT ADDED =================
+// #ifdef HYT_INSTRUMENT
+    
+//     show_info();
+// #endif
+// ==============================================
 }
 
 void target_cpu_copy_regs(CPUArchState *env, struct target_pt_regs *regs)

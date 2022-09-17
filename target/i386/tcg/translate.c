@@ -500,6 +500,7 @@ static inline void gen_op_ld_v(DisasContext *s, int idx, TCGv t0, TCGv a0)
 static inline void gen_op_st_v(DisasContext *s, int idx, TCGv t0, TCGv a0)
 {
     tcg_gen_qemu_st_tl(t0, a0, s->mem_index, idx | MO_LE);
+    // printf("%d\n", s->mem_index);
 }
 
 static inline void gen_op_st_rm_T0_A0(DisasContext *s, int idx, int d)
@@ -2274,6 +2275,7 @@ static void gen_ldst_modrm(CPUX86State *env, DisasContext *s, int modrm,
             if (reg != OR_TMP0)
                 gen_op_mov_v_reg(s, ot, s->T0, reg);
             gen_op_st_v(s, ot, s->T0, s->A0);
+            // printf("addr %d\n", tcgv_i32_arg(s->A0));
         } else {
             gen_op_ld_v(s, ot, s->T0, s->A0);
             if (reg != OR_TMP0)
@@ -4658,6 +4660,139 @@ static void gen_sse(CPUX86State *env, DisasContext *s, int b,
     }
 }
 
+#define HYT_INSTRUMENT
+#ifdef HYT_INSTRUMENT
+#include "hyt-tcg-instrumenting.h"
+
+
+// static void instrumenting_init() {
+//     uint32_t* mem_w = (uint32_t*)(mmap(
+//                     0x3f810000,                   //分配的首地址
+//                     getpagesize(),          //分配内存大小(必须是页的整数倍, 32位1页=4k)
+//                     PROT_READ | PROT_WRITE, //映射区域保护权限：读|写
+//                     MAP_ANONYMOUS | MAP_SHARED,  //匿名映射(不涉及文件io), 后面两个参数忽略
+//                     0,                      //要映射到内存中的文件描述符
+//                     0                       //文件映射的偏移量，通常设置为0，必须是页的整数倍
+//     ));
+//     uint32_t* mem_r = (uint32_t*)(mmap(
+//                     NULL,                   //分配的首地址
+//                     getpagesize(),          //分配内存大小(必须是页的整数倍, 32位1页=4k)
+//                     PROT_READ | PROT_WRITE, //映射区域保护权限：读|写
+//                     MAP_ANONYMOUS | MAP_SHARED,  //匿名映射(不涉及文件io), 后面两个参数忽略
+//                     0,                      //要映射到内存中的文件描述符
+//                     0                       //文件映射的偏移量，通常设置为0，必须是页的整数倍
+//     ));
+//     uint32_t* ret_value = (uint32_t*)(mmap(
+//                     NULL,                   //分配的首地址
+//                     getpagesize(),          //分配内存大小(必须是页的整数倍, 32位1页=4k)
+//                     PROT_READ | PROT_WRITE, //映射区域保护权限：读|写
+//                     MAP_ANONYMOUS | MAP_SHARED,  //匿名映射(不涉及文件io), 后面两个参数忽略
+//                     0,                      //要映射到内存中的文件描述符
+//                     0                       //文件映射的偏移量，通常设置为0，必须是页的整数倍
+//     ));
+// }
+
+// static void instrumenting_finish() {
+//     // munmap(arr, getpagesize());
+// }
+
+// void tcg_gen_mov_i64(TCGv_i64 ret, TCGv_i64 arg)
+// {
+//     TCGTemp *ts = tcgv_i64_temp(arg);
+
+//     /* Canonicalize TCGv_i64 TEMP_CONST into TCGv_i32 TEMP_CONST. */
+//     if (ts->kind == TEMP_CONST) {
+//         tcg_gen_movi_i64(ret, ts->val);
+//     } else {
+//         tcg_gen_mov_i32(TCGV_LOW(ret), TCGV_LOW(arg));
+//         tcg_gen_mov_i32(TCGV_HIGH(ret), TCGV_HIGH(arg));
+//     }
+// }
+
+// void tcg_gen_movi_i64(TCGv_i64 ret, int64_t arg)
+// {
+//     tcg_gen_movi_i32(TCGV_LOW(ret), arg);
+//     tcg_gen_movi_i32(TCGV_HIGH(ret), arg >> 32);
+// }
+
+static void mem_rw_instrumenting(DisasContext *s, TCGOpcode opc, int reg, bool isMOVEvIv) {
+
+
+    // Push eax
+    // if((uint32_t)((uint64_t)(mem_r+0x1234) & (uint64_t)MASK32) == 0x3f821234) {
+        // printf("0x3f821234: 0x%x : 0x%x\n", (uint32_t)((uint64_t)(mem_r) & (uint64_t)MASK32), *(mem_r+0x1234) );
+    // }
+
+
+    // printf("0x%lx\n", test);
+    // scanf("%d", test);
+    
+
+    // if is mem read
+    if(opc == INDEX_op_qemu_ld_i32) {
+
+        // printf("0x%lx\n", ((uint64_t)mem_r));
+        // printf("0x%x\n", (uint32_t)((uint64_t)mem_r & (uint64_t)MASK32));
+
+        // int *a = 0x3f810000;
+        // a[icount] = icount + 0x400;
+        // printf("0x%x, icount = %x\n", a[icount], icount);
+        // icount++;
+
+
+        // Mov eax, mem_r
+        // add eax, icount
+        // Mov DWORD PTR [eax], mem_r_value
+        // tcg_gen_movi_tl(s->A0, (uint32_t)( ((uint64_t)(mem_r+icount_mem_r) >> 1) & (uint64_t)MASK32));
+        tcg_gen_movi_tl(s->A0, (uint32_t)( ((uint64_t)(mem_r+icount_mem_r)) & (uint64_t)MASK32));
+        // tcg_gen_movi_i64(s->tmp1_i64, (uint64_t)(mem_r+icount_mem_r));
+        
+        // printf("ld : memr base is: 0x%lx,  memr + icount_memr should be 0x%lx, but is 0x%x + 0x%x - 0x%x \n", mem_r, mem_r+icount_mem_r, (uint32_t)((uint64_t)(mem_r+icount_mem_r) & (uint64_t)MASK32), icount_mem_r);
+
+        icount_mem_r++;
+
+    } else if (opc == INDEX_op_qemu_st_i32) { // if is mem write
+        // Mov eax, mem_w
+        // add eax, icount
+        // Mov DWORD PTR [eax], mem_w_value
+        // tcg_gen_movi_tl(s->A0, (uint32_t)( ((uint64_t)(mem_w+icount_mem_w) >> 1) &  (uint64_t)MASK32));
+        tcg_gen_movi_tl(s->A0, (uint32_t)( ((uint64_t)(mem_w+icount_mem_w)) &  (uint64_t)MASK32));
+        // tcg_gen_movi_i64(s->tmp1_i64, (uint64_t)(mem_w+icount_mem_w));
+
+        // printf("st : 0x%x + 0x%x \n", (uint32_t)((uint64_t)(mem_w+icount_mem_w- GS_OFFSET) & (uint64_t)MASK32), icount_mem_w);
+        // gen_op_mov_v_reg(s, ot, s->T0, reg);
+        // gen_op_st_v(s, ot, s->T0, s->A0);
+
+        icount_mem_w++;
+
+    } else {
+        printf("[Warning] Unsupported opc: %d\n", (uint32_t)opc);
+        return;
+    }
+
+    // s->A0 << 1
+    // gen_shifti(s, OP_SHL1, MO_32, s->A0, 1);
+    // tcg_gen_shli_i64((TCGv_i64)s->A0, (TCGv_i64)s->A0, 1);
+    if(isMOVEvIv) { // If guest opc is 0xc7, i.e., Mov Ev, Iv.
+        gen_op_st_v(s, MO_32, s->T0, s->A0);
+        // tcg_gen_st_i32(TCGV_HIGH(arg1), arg2, offset);
+        // tcg_gen_st_i32(TCGV_LOW(arg1), arg2, offset + 4);
+    } else {
+        gen_op_mov_v_reg(s, MO_32, s->T0, reg);
+        gen_op_st_v(s, MO_32, s->T0, s->A0);
+    }
+    
+}
+
+
+// static void arg_instrumenting(DisasContext *s, int arg_num) {
+//     // for()
+// }
+
+#endif
+
+
+
 /* convert one instruction. s->base.is_jmp is set if the translation must
    be stopped. Return the next pc value */
 static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
@@ -4694,6 +4829,11 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
     switch (b) {
     case 0xf3:
         prefixes |= PREFIX_REPZ;
+        // log_cpu_exec(pc, cpu, s->bc.tb);
+        // printf("Rax 0x%lx\n", (unsigned long)(env->regs[R_EAX])); 
+        // if(!strcmp("main", lookup_symbol(s->base.pc_first))){
+        //     printf("Rax 0x%lx\n", (unsigned long)(env->regs[R_EAX]));
+        // }
         goto next_byte;
     case 0xf2:
         prefixes |= PREFIX_REPNZ;
@@ -5675,13 +5815,23 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
         /**************************/
         /* mov */
     case 0x88:
-    case 0x89: /* mov Gv, Ev */
+    case 0x89: /* mov Ev, Gv */
         ot = mo_b_d(b, dflag);
+        // printf("ot:%d\n", (uint32_t)ot);
         modrm = x86_ldub_code(env, s);
         reg = ((modrm >> 3) & 7) | REX_R(s);
-
+        // if(modrm == 0x45) {
+        //     printf("modrm %x : ", modrm);
+        //     printf("mov ptr, reg value: %d\n", (uint32_t)tcgv_i32_arg((TCGv_i32)cpu_regs[reg]));
+        // }
+        
         /* generate a generic store */
         gen_ldst_modrm(env, s, modrm, ot, reg, 1);
+        // ====================== HYT Added ====================
+#ifdef HYT_INSTRUMENT
+        mem_rw_instrumenting(s, INDEX_op_qemu_st_i32, reg, 0);
+#endif
+        // =====================================================
         break;
     case 0xc6:
     case 0xc7: /* mov Ev, Iv */
@@ -5699,15 +5849,25 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
         } else {
             gen_op_mov_reg_v(s, ot, (modrm & 7) | REX_B(s), s->T0);
         }
+        // ====================== HYT Added ====================
+#ifdef HYT_INSTRUMENT
+        mem_rw_instrumenting(s, INDEX_op_qemu_st_i32, reg, 1);
+#endif
+        // =====================================================
         break;
     case 0x8a:
-    case 0x8b: /* mov Ev, Gv */
+    case 0x8b: /* mov Gv, Ev */
         ot = mo_b_d(b, dflag);
         modrm = x86_ldub_code(env, s);
         reg = ((modrm >> 3) & 7) | REX_R(s);
 
         gen_ldst_modrm(env, s, modrm, ot, OR_TMP0, 0);
         gen_op_mov_reg_v(s, ot, reg, s->T0);
+        // ====================== HYT Added ====================
+#ifdef HYT_INSTRUMENT
+        mem_rw_instrumenting(s, INDEX_op_qemu_ld_i32, reg, 0);
+#endif
+        // =====================================================
         break;
     case 0x8e: /* mov seg, Gv */
         modrm = x86_ldub_code(env, s);
@@ -5857,6 +6017,7 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
         } else
 #endif
         {
+            // printf("%d\n", (uint32_t)dflag);
             ot = dflag;
             val = insn_get(env, s, ot);
             reg = (b & 7) | REX_B(s);
@@ -6756,6 +6917,13 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
         gen_jr(s, s->T0);
         break;
     case 0xc3: /* ret */
+        // printf("- pc 0x%lx\n", (unsigned long)(s->pc - s->cs_base));
+        // printf("RIP 0x%lx\n", (unsigned long)(env->eip));
+        // printf("Rax 0x%lx\n", (unsigned long)(env->regs[R_EAX]));
+        // if(env->regs[R_EAX] < 0x10 && env->regs[R_EAX] > 0) {
+        //     env->regs[R_EAX] = 0x7;
+        // }
+        
         ot = gen_pop_T0(s);
         gen_pop_update(s, ot);
         /* Note that gen_pop_T0 uses a zero-extending load.  */
@@ -6819,6 +6987,7 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
             } else if (!CODE64(s)) {
                 tval &= 0xffffffff;
             }
+            // printf("next_eip:0x%x\n", next_eip);
             tcg_gen_movi_tl(s->T0, next_eip);
             gen_push_v(s, s->T0);
             gen_bnd_jmp(s);
@@ -6840,6 +7009,7 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
         }
         goto do_lcall;
     case 0xe9: /* jmp im */
+
         if (dflag != MO_16) {
             tval = (int32_t)insn_get(env, s, MO_32);
         } else {

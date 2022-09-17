@@ -1469,8 +1469,87 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
                 prof->interm_time + profile_getclock() - ti);
     ti = profile_getclock();
 #endif
+// ====================== hyt added ====================
+#ifdef HYT
+    TCGContext *s = tcg_ctx;
+#endif
+// ====================================================
 
     gen_code_size = tcg_gen_code(tcg_ctx, tb);
+
+// ====================== hyt added ====================
+    // printf("OPCODD: %d\n", *((uint32_t*)tcg_ctx->code_gen_ptr));
+#ifdef HYT
+    TCGOp *op;
+    for ((op) = ((&s->ops)->tqh_first); (op); (op) = ((op)->link.tqe_next)) {
+        TCGOpcode opc = op->opc;
+        printf("OPCODD: %d\n", (uint32_t)opc);
+
+        switch (opc) {
+        case INDEX_op_mov_i32:
+        case INDEX_op_mov_i64:
+        case INDEX_op_mov_vec:
+            // tcg_reg_alloc_mov(s, op);
+            puts("TCG mov");
+            break;
+        case INDEX_op_dup_vec:
+            puts("TCG dup");
+            // tcg_reg_alloc_dup(s, op);
+            break;
+        case INDEX_op_insn_start:
+            puts("TCG insn start");
+//             if (num_insns >= 0) {
+//                 size_t off = tcg_current_code_size(s);
+//                 s->gen_insn_end_off[num_insns] = off;
+//                 /* Assert that we do not overflow our stored offset.  */
+//                 assert(s->gen_insn_end_off[num_insns] == off);
+//             }
+//             num_insns++;
+//             for (i = 0; i < TARGET_INSN_START_WORDS; ++i) {
+//                 target_ulong a;
+// #if TARGET_LONG_BITS > TCG_TARGET_REG_BITS
+//                 a = deposit64(op->args[i * 2], 32, 32, op->args[i * 2 + 1]);
+// #else
+//                 a = op->args[i];
+// #endif
+//                 s->gen_insn_data[num_insns][i] = a;
+//             }
+            break;
+        case INDEX_op_discard:
+            puts("TCG discard");
+            // temp_dead(s, arg_temp(op->args[0]));
+            break;
+        case INDEX_op_set_label:
+            puts("TCG set label");
+            // tcg_reg_alloc_bb_end(s, s->reserved_regs);
+            // tcg_out_label(s, arg_label(op->args[0]));
+            break;
+        case INDEX_op_call:
+            // tcg_reg_alloc_call(s, op);
+            puts("TCG call");
+            break;
+        case INDEX_op_dup2_vec:
+            puts("TCG dup2");
+            // if (tcg_reg_alloc_dup2(s, op)) {
+            //     break;
+            // }
+            /* fall through */
+        default:
+            /* Sanity check that we've not introduced any unhandled opcodes. */
+            tcg_debug_assert(tcg_op_supported(opc));
+            /* Note: in order to speed up the code, it would be much
+               faster to have specialized register allocator functions for
+               some common argument patterns */
+            // tcg_reg_alloc_op(s, op);
+            break;
+        }
+
+
+    }
+#endif
+// ====================================================
+
+
     if (unlikely(gen_code_size < 0)) {
  error_return:
         switch (gen_code_size) {
@@ -1525,78 +1604,148 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 #endif
 
 #ifdef DEBUG_DISAS
-    if (qemu_loglevel_mask(CPU_LOG_TB_OUT_ASM) &&
-        qemu_log_in_addr_range(tb->pc)) {
-        FILE *logfile = qemu_log_trylock();
-        if (logfile) {
-            int code_size, data_size;
-            const tcg_target_ulong *rx_data_gen_ptr;
-            size_t chunk_start;
-            int insn = 0;
+    FILE *logfile = fopen("/seagate/hyt/binary-sim/test/env_regs_test/logfile/host_code_log.txt", "a");
+    if (logfile) {
+        int code_size, data_size;
+        const tcg_target_ulong *rx_data_gen_ptr;
+        size_t chunk_start;
+        int insn = 0;
 
-            if (tcg_ctx->data_gen_ptr) {
-                rx_data_gen_ptr = tcg_splitwx_to_rx(tcg_ctx->data_gen_ptr);
-                code_size = (const void *)rx_data_gen_ptr - tb->tc.ptr;
-                data_size = gen_code_size - code_size;
-            } else {
-                rx_data_gen_ptr = 0;
-                code_size = gen_code_size;
-                data_size = 0;
-            }
-
-            /* Dump header and the first instruction */
-            fprintf(logfile, "OUT: [size=%d]\n", gen_code_size);
-            fprintf(logfile,
-                    "  -- guest addr 0x" TARGET_FMT_lx " + tb prologue\n",
-                    tcg_ctx->gen_insn_data[insn][0]);
-            chunk_start = tcg_ctx->gen_insn_end_off[insn];
-            disas(logfile, tb->tc.ptr, chunk_start);
-
-            /*
-             * Dump each instruction chunk, wrapping up empty chunks into
-             * the next instruction. The whole array is offset so the
-             * first entry is the beginning of the 2nd instruction.
-             */
-            while (insn < tb->icount) {
-                size_t chunk_end = tcg_ctx->gen_insn_end_off[insn];
-                if (chunk_end > chunk_start) {
-                    fprintf(logfile, "  -- guest addr 0x" TARGET_FMT_lx "\n",
-                            tcg_ctx->gen_insn_data[insn][0]);
-                    disas(logfile, tb->tc.ptr + chunk_start,
-                          chunk_end - chunk_start);
-                    chunk_start = chunk_end;
-                }
-                insn++;
-            }
-
-            if (chunk_start < code_size) {
-                fprintf(logfile, "  -- tb slow paths + alignment\n");
-                disas(logfile, tb->tc.ptr + chunk_start,
-                      code_size - chunk_start);
-            }
-
-            /* Finally dump any data we may have after the block */
-            if (data_size) {
-                int i;
-                fprintf(logfile, "  data: [size=%d]\n", data_size);
-                for (i = 0; i < data_size / sizeof(tcg_target_ulong); i++) {
-                    if (sizeof(tcg_target_ulong) == 8) {
-                        fprintf(logfile,
-                                "0x%08" PRIxPTR ":  .quad  0x%016" TCG_PRIlx "\n",
-                                (uintptr_t)&rx_data_gen_ptr[i], rx_data_gen_ptr[i]);
-                    } else if (sizeof(tcg_target_ulong) == 4) {
-                        fprintf(logfile,
-                                "0x%08" PRIxPTR ":  .long  0x%08" TCG_PRIlx "\n",
-                                (uintptr_t)&rx_data_gen_ptr[i], rx_data_gen_ptr[i]);
-                    } else {
-                        qemu_build_not_reached();
-                    }
-                }
-            }
-            fprintf(logfile, "\n");
-            qemu_log_unlock(logfile);
+        if (tcg_ctx->data_gen_ptr) {
+            rx_data_gen_ptr = tcg_splitwx_to_rx(tcg_ctx->data_gen_ptr);
+            code_size = (const void *)rx_data_gen_ptr - tb->tc.ptr;
+            data_size = gen_code_size - code_size;
+        } else {
+            rx_data_gen_ptr = 0;
+            code_size = gen_code_size;
+            data_size = 0;
         }
+
+        /* Dump header and the first instruction */
+        fprintf(logfile, "OUT: [size=%d]\n", gen_code_size);
+        fprintf(logfile,
+                "  -- guest addr 0x" TARGET_FMT_lx " + tb prologue\n",
+                tcg_ctx->gen_insn_data[insn][0]);
+        chunk_start = tcg_ctx->gen_insn_end_off[insn];
+        disas(logfile, tb->tc.ptr, chunk_start);
+
+        /*
+            * Dump each instruction chunk, wrapping up empty chunks into
+            * the next instruction. The whole array is offset so the
+            * first entry is the beginning of the 2nd instruction.
+            */
+        while (insn < tb->icount) {
+            size_t chunk_end = tcg_ctx->gen_insn_end_off[insn];
+            if (chunk_end > chunk_start) {
+                fprintf(logfile, "  -- guest addr 0x" TARGET_FMT_lx "\n",
+                        tcg_ctx->gen_insn_data[insn][0]);
+                disas(logfile, tb->tc.ptr + chunk_start,
+                        chunk_end - chunk_start);
+                chunk_start = chunk_end;
+            }
+            insn++;
+        }
+
+        if (chunk_start < code_size) {
+            fprintf(logfile, "  -- tb slow paths + alignment\n");
+            disas(logfile, tb->tc.ptr + chunk_start,
+                    code_size - chunk_start);
+        }
+
+        /* Finally dump any data we may have after the block */
+        if (data_size) {
+            int i;
+            fprintf(logfile, "  data: [size=%d]\n", data_size);
+            for (i = 0; i < data_size / sizeof(tcg_target_ulong); i++) {
+                if (sizeof(tcg_target_ulong) == 8) {
+                    fprintf(logfile,
+                            "0x%08" PRIxPTR ":  .quad  0x%016" TCG_PRIlx "\n",
+                            (uintptr_t)&rx_data_gen_ptr[i], rx_data_gen_ptr[i]);
+                } else if (sizeof(tcg_target_ulong) == 4) {
+                    fprintf(logfile,
+                            "0x%08" PRIxPTR ":  .long  0x%08" TCG_PRIlx "\n",
+                            (uintptr_t)&rx_data_gen_ptr[i], rx_data_gen_ptr[i]);
+                } else {
+                    qemu_build_not_reached();
+                }
+            }
+        }
+        fprintf(logfile, "\n");
+        // qemu_log_unlock(logfile);
+        fclose(logfile);
     }
+    // if (qemu_loglevel_mask(CPU_LOG_TB_OUT_ASM) &&
+    //     qemu_log_in_addr_range(tb->pc)) {
+    //     FILE *logfile = qemu_log_trylock();
+    //     if (logfile) {
+    //         int code_size, data_size;
+    //         const tcg_target_ulong *rx_data_gen_ptr;
+    //         size_t chunk_start;
+    //         int insn = 0;
+
+    //         if (tcg_ctx->data_gen_ptr) {
+    //             rx_data_gen_ptr = tcg_splitwx_to_rx(tcg_ctx->data_gen_ptr);
+    //             code_size = (const void *)rx_data_gen_ptr - tb->tc.ptr;
+    //             data_size = gen_code_size - code_size;
+    //         } else {
+    //             rx_data_gen_ptr = 0;
+    //             code_size = gen_code_size;
+    //             data_size = 0;
+    //         }
+
+    //         /* Dump header and the first instruction */
+    //         fprintf(logfile, "OUT: [size=%d]\n", gen_code_size);
+    //         fprintf(logfile,
+    //                 "  -- guest addr 0x" TARGET_FMT_lx " + tb prologue\n",
+    //                 tcg_ctx->gen_insn_data[insn][0]);
+    //         chunk_start = tcg_ctx->gen_insn_end_off[insn];
+    //         disas(logfile, tb->tc.ptr, chunk_start);
+
+    //         /*
+    //          * Dump each instruction chunk, wrapping up empty chunks into
+    //          * the next instruction. The whole array is offset so the
+    //          * first entry is the beginning of the 2nd instruction.
+    //          */
+    //         while (insn < tb->icount) {
+    //             size_t chunk_end = tcg_ctx->gen_insn_end_off[insn];
+    //             if (chunk_end > chunk_start) {
+    //                 fprintf(logfile, "  -- guest addr 0x" TARGET_FMT_lx "\n",
+    //                         tcg_ctx->gen_insn_data[insn][0]);
+    //                 disas(logfile, tb->tc.ptr + chunk_start,
+    //                       chunk_end - chunk_start);
+    //                 chunk_start = chunk_end;
+    //             }
+    //             insn++;
+    //         }
+
+    //         if (chunk_start < code_size) {
+    //             fprintf(logfile, "  -- tb slow paths + alignment\n");
+    //             disas(logfile, tb->tc.ptr + chunk_start,
+    //                   code_size - chunk_start);
+    //         }
+
+    //         /* Finally dump any data we may have after the block */
+    //         if (data_size) {
+    //             int i;
+    //             fprintf(logfile, "  data: [size=%d]\n", data_size);
+    //             for (i = 0; i < data_size / sizeof(tcg_target_ulong); i++) {
+    //                 if (sizeof(tcg_target_ulong) == 8) {
+    //                     fprintf(logfile,
+    //                             "0x%08" PRIxPTR ":  .quad  0x%016" TCG_PRIlx "\n",
+    //                             (uintptr_t)&rx_data_gen_ptr[i], rx_data_gen_ptr[i]);
+    //                 } else if (sizeof(tcg_target_ulong) == 4) {
+    //                     fprintf(logfile,
+    //                             "0x%08" PRIxPTR ":  .long  0x%08" TCG_PRIlx "\n",
+    //                             (uintptr_t)&rx_data_gen_ptr[i], rx_data_gen_ptr[i]);
+    //                 } else {
+    //                     qemu_build_not_reached();
+    //                 }
+    //             }
+    //         }
+    //         fprintf(logfile, "\n");
+    //         qemu_log_unlock(logfile);
+    //     }
+    // }
 #endif
 
     qatomic_set(&tcg_ctx->code_gen_ptr, (void *)

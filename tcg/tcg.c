@@ -1193,6 +1193,9 @@ bool tcg_op_supported(TCGOpcode op)
     case INDEX_op_qemu_st_i32:
     case INDEX_op_qemu_ld_i64:
     case INDEX_op_qemu_st_i64:
+#ifdef HYT
+        puts("TCG control flow");
+#endif
         return true;
 
     case INDEX_op_qemu_st8_i32:
@@ -1218,6 +1221,9 @@ bool tcg_op_supported(TCGOpcode op)
     case INDEX_op_shl_i32:
     case INDEX_op_shr_i32:
     case INDEX_op_sar_i32:
+#ifdef HYT
+        puts("TCG memory and arithmatic or logic op");
+#endif
         return true;
 
     case INDEX_op_movcond_i32:
@@ -4217,16 +4223,27 @@ int tcg_gen_code(TCGContext *s, TranslationBlock *tb)
 #endif
 
 #ifdef DEBUG_DISAS
-    if (unlikely(qemu_loglevel_mask(CPU_LOG_TB_OP)
-                 && qemu_log_in_addr_range(tb->pc))) {
-        FILE *logfile = qemu_log_trylock();
+    FILE *logfile = fopen("/seagate/hyt/binary-sim/test/env_regs_test/logfile/tcg_code_log.txt", "a");
         if (logfile) {
             fprintf(logfile, "OP:\n");
             tcg_dump_ops(s, logfile, false);
             fprintf(logfile, "\n");
-            qemu_log_unlock(logfile);
+            // qemu_log_unlock(logfile);
+            fclose(logfile);
         }
-    }
+
+    // if (unlikely(qemu_loglevel_mask(CPU_LOG_TB_OP)
+    //              && qemu_log_in_addr_range(tb->pc))) {
+    //     FILE *logfile = qemu_log_trylock();
+    //     // FILE *logfile = fopen("log.txt", "w+");
+    //     if (logfile) {
+    //         fprintf(logfile, "OP:\n");
+    //         tcg_dump_ops(s, logfile, false);
+    //         fprintf(logfile, "\n");
+    //         qemu_log_unlock(logfile);
+    //         // fclose(logfile);
+    //     }
+    // }
 #endif
 
 #ifdef CONFIG_DEBUG_TCG
@@ -4329,6 +4346,7 @@ int tcg_gen_code(TCGContext *s, TranslationBlock *tb)
         case INDEX_op_mov_i64:
         case INDEX_op_mov_vec:
             tcg_reg_alloc_mov(s, op);
+            // printf("after mov, ")
             break;
         case INDEX_op_dup_vec:
             tcg_reg_alloc_dup(s, op);
@@ -4369,6 +4387,7 @@ int tcg_gen_code(TCGContext *s, TranslationBlock *tb)
         default:
             /* Sanity check that we've not introduced any unhandled opcodes. */
             tcg_debug_assert(tcg_op_supported(opc));
+
             /* Note: in order to speed up the code, it would be much
                faster to have specialized register allocator functions for
                some common argument patterns */

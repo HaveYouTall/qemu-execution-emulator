@@ -203,33 +203,52 @@ static inline TranslationBlock *tb_lookup(CPUState *cpu, target_ulong pc,
 static inline void log_cpu_exec(target_ulong pc, CPUState *cpu,
                                 const TranslationBlock *tb)
 {
-    if (unlikely(qemu_loglevel_mask(CPU_LOG_TB_CPU | CPU_LOG_EXEC))
-        && qemu_log_in_addr_range(pc)) {
 
+    FILE *hyt = fopen("/seagate/hyt/binary-sim/test/env_regs_test/cpu_dump.txt", "a");
+    if (hyt) {
+        int flags = 0;
         qemu_log_mask(CPU_LOG_EXEC,
                       "Trace %d: %p [" TARGET_FMT_lx
                       "/" TARGET_FMT_lx "/%08x/%08x] %s\n",
                       cpu->cpu_index, tb->tc.ptr, tb->cs_base, pc,
                       tb->flags, tb->cflags, lookup_symbol(pc));
-
-#if defined(DEBUG_DISAS)
-        if (qemu_loglevel_mask(CPU_LOG_TB_CPU)) {
-            FILE *logfile = qemu_log_trylock();
-            if (logfile) {
-                int flags = 0;
-
-                if (qemu_loglevel_mask(CPU_LOG_TB_FPU)) {
-                    flags |= CPU_DUMP_FPU;
-                }
-#if defined(TARGET_I386)
-                flags |= CPU_DUMP_CCOP;
-#endif
-                cpu_dump_state(cpu, logfile, flags);
-                qemu_log_unlock(logfile);
-            }
+        if (qemu_loglevel_mask(CPU_LOG_TB_FPU)) {
+            flags |= CPU_DUMP_FPU;
         }
-#endif /* DEBUG_DISAS */
+#if defined(TARGET_I386)
+        flags |= CPU_DUMP_CCOP;
+#endif
+        cpu_dump_state(cpu, hyt, flags);
+        fclose(hyt);
     }
+
+//     if (unlikely(qemu_loglevel_mask(CPU_LOG_TB_CPU | CPU_LOG_EXEC))
+//         && qemu_log_in_addr_range(pc)) {
+
+//         qemu_log_mask(CPU_LOG_EXEC,
+//                       "Trace %d: %p [" TARGET_FMT_lx
+//                       "/" TARGET_FMT_lx "/%08x/%08x] %s\n",
+//                       cpu->cpu_index, tb->tc.ptr, tb->cs_base, pc,
+//                       tb->flags, tb->cflags, lookup_symbol(pc));
+
+// #if defined(DEBUG_DISAS)
+//         if (qemu_loglevel_mask(CPU_LOG_TB_CPU)) {
+//             FILE *logfile = qemu_log_trylock();
+//             if (logfile) {
+//                 int flags = 0;
+
+//                 if (qemu_loglevel_mask(CPU_LOG_TB_FPU)) {
+//                     flags |= CPU_DUMP_FPU;
+//                 }
+// #if defined(TARGET_I386)
+//                 flags |= CPU_DUMP_CCOP;
+// #endif
+//                 cpu_dump_state(cpu, logfile, flags);
+//                 qemu_log_unlock(logfile);
+//             }
+//         }
+// #endif /* DEBUG_DISAS */
+//     }
 }
 
 static bool check_for_breakpoints(CPUState *cpu, target_ulong pc,
@@ -334,6 +353,780 @@ const void *HELPER(lookup_tb_ptr)(CPUArchState *env)
     return tb->tc.ptr;
 }
 
+// =================== HYT ADDED =======================
+// BUGS
+// #define HYT_TEST_IR_COED
+#ifdef HYT_TEST_IR_COED
+// #include <ffi.h>
+// #include "tcg/tcg.h"
+// #include "tcg/tcg-opc.h"
+// #include "tcg/tcg-ldst.h"
+// #include "qemu/compiler.h"
+// #include "exec/cpu_ldst.h"
+// #include "qemu/osdep.h"
+// __thread uintptr_t tci_tb_ptr;
+
+#if TCG_TARGET_REG_BITS == 64
+# define CASE_32_64(x) \
+        case glue(glue(INDEX_op_, x), _i64): \
+        case glue(glue(INDEX_op_, x), _i32):
+# define CASE_64(x) \
+        case glue(glue(INDEX_op_, x), _i64):
+#else
+# define CASE_32_64(x) \
+        case glue(glue(INDEX_op_, x), _i32):
+# define CASE_64(x)
+#endif
+
+/*
+ * Enable TCI assertions only when debugging TCG (and without NDEBUG defined).
+ * Without assertions, the interpreter runs much faster.
+ */
+#if defined(CONFIG_DEBUG_TCG)
+# define tci_assert(cond) assert(cond)
+#else
+# define tci_assert(cond) ((void)(cond))
+#endif
+
+static void tci_args_rr(uint32_t insn, TCGReg *r0, TCGReg *r1)
+{
+    *r0 = extract32(insn, 8, 4);
+    *r1 = extract32(insn, 12, 4);
+}
+
+/* Interpret pseudo code in tb. */
+/*
+ * Disable CFI checks.
+ * One possible operation in the pseudo code is a call to binary code.
+ * Therefore, disable CFI checks in the interpreter function
+ */
+// #include <exception>
+static uint32_t hyt_test_IR_code(CPUArchState *env, const void *v_tb_ptr)
+{
+//     // puts("IS procesed");
+    const uint32_t *tb_ptr = v_tb_ptr;
+    tcg_target_ulong regs[TCG_TARGET_NB_REGS];
+    uint64_t stack[(TCG_STATIC_CALL_ARGS_SIZE + TCG_STATIC_FRAME_SIZE) \
+                   / sizeof(uint64_t)];
+    // void *call_slots[TCG_STATIC_CALL_ARGS_SIZE / sizeof(uint64_t)];
+
+    regs[TCG_AREG0] = (tcg_target_ulong)env;
+    regs[TCG_REG_CALL_STACK] = (uintptr_t)stack;
+//     /* Other call_slots entries initialized at first use (see below). */
+//     // call_slots[0] = NULL;
+    tci_assert(tb_ptr);
+
+    // puts("[+] Start show IR code");
+    // printf("ptr: 0x%lx\n", (uint64_t)tb_ptr);
+    // printf("test *ptr %x\n", *tb_ptr);
+    // printf("test extract: %d\n", extract32(*tb_ptr, 0, 8));
+    // puts("start");
+//     bool once = true;
+    for (;;) {
+        uint32_t insn;
+        TCGOpcode opc;
+        
+        TCGReg r0, r1;//, r2, r3, r4, r5;
+//         // tcg_target_ulong t1;
+//         // TCGCond condition;
+//         // target_ulong taddr;
+//         // uint8_t pos, len;
+//         // uint32_t tmp32;
+//         // uint64_t tmp64;
+//         // uint64_t T1, T2;
+//         // MemOpIdx oi;
+//         // int32_t ofs;
+//         // void *ptr;
+        // puts("find insn");
+        // try{
+        //     insn = *tb_ptr++;
+        // } catch (...) {
+        //     return 0;
+        // }
+
+        if((uint64_t)tb_ptr > (uint64_t)v_tb_ptr + 0x30000) {
+            return 0;
+        }
+        // tci_assert(tb_ptr);
+        // printf("ptr: 0x%lx\n", (uint64_t)tb_ptr);
+        insn = *tb_ptr++;
+        // printf("opcode: %d -- ", (uint32_t)insn);
+        
+        opc = extract32(insn, 0, 8);
+        switch (opc) {
+            CASE_32_64(mov)
+                tci_args_rr(insn, &r0, &r1);
+                regs[r0] = regs[r1];
+                printf("opcode: %d -- ", (uint32_t)opc);
+                printf("Val: %lx\n", regs[r1]);
+                break;
+            case INDEX_op_exit_tb:
+            case INDEX_op_goto_ptr:
+                return 0;
+            default:
+                break;
+        }
+
+
+
+//         case INDEX_op_call:
+//             puts("INDEX_op_call");
+//             /*
+//              * Set up the ffi_avalue array once, delayed until now
+//              * because many TB's do not make any calls. In tcg_gen_callN,
+//              * we arranged for every real argument to be "left-aligned"
+//              * in each 64-bit slot.
+//              */
+//             // if (unlikely(call_slots[0] == NULL)) {
+//             //     for (int i = 0; i < ARRAY_SIZE(call_slots); ++i) {
+//             //         call_slots[i] = &stack[i];
+//             //     }
+//             // }
+
+//             // tci_args_nl(insn, tb_ptr, &len, &ptr);
+
+//             // /* Helper functions may need to access the "return address" */
+//             // tci_tb_ptr = (uintptr_t)tb_ptr;
+
+//             // {
+//             //     void **pptr = ptr;
+//             //     ffi_call(pptr[1], pptr[0], stack, call_slots);
+//             // }
+
+//             /* Any result winds up "left-aligned" in the stack[0] slot. */
+//             // switch (len) {
+//             switch (0) {
+//             case 0: /* void */
+//                 break;
+//             case 1: /* uint32_t */
+//                 /*
+//                  * Note that libffi has an odd special case in that it will
+//                  * always widen an integral result to ffi_arg.
+//                  */
+//                 // if (sizeof(ffi_arg) == 4) {
+//                 //     regs[TCG_REG_R0] = *(uint32_t *)stack;
+//                     break;
+//                 // }
+//                 /* fall through */
+//             case 2: /* uint64_t */
+//                 // if (TCG_TARGET_REG_BITS == 32) {
+//                 //     tci_write_reg64(regs, TCG_REG_R1, TCG_REG_R0, stack[0]);
+//                 // } else {
+//                 //     regs[TCG_REG_R0] = stack[0];
+//                 // }
+//                 break;
+//             default:
+//                 g_assert_not_reached();
+//             }
+//             break;
+
+//         case INDEX_op_br:
+//             // tci_args_l(insn, tb_ptr, &ptr);
+//             // tb_ptr = ptr;
+//             puts("INDEX_op_br");
+//             continue;
+//         case INDEX_op_setcond_i32:
+//             puts("INDEX_op_setcond_i32");
+//             // tci_args_rrrc(insn, &r0, &r1, &r2, &condition);
+//             // regs[r0] = tci_compare32(regs[r1], regs[r2], condition);
+//             break;
+//         case INDEX_op_movcond_i32:
+//             puts("INDEX_op_movcond_i32");
+//             // tci_args_rrrrrc(insn, &r0, &r1, &r2, &r3, &r4, &condition);
+//             // tmp32 = tci_compare32(regs[r1], regs[r2], condition);
+//             // regs[r0] = regs[tmp32 ? r3 : r4];
+//             break;
+// #if TCG_TARGET_REG_BITS == 32
+//         case INDEX_op_setcond2_i32:
+//             puts("INDEX_op_setcond2_i32");
+//             // tci_args_rrrrrc(insn, &r0, &r1, &r2, &r3, &r4, &condition);
+//             // T1 = tci_uint64(regs[r2], regs[r1]);
+//             // T2 = tci_uint64(regs[r4], regs[r3]);
+//             // regs[r0] = tci_compare64(T1, T2, condition);
+//             break;
+// #elif TCG_TARGET_REG_BITS == 64
+//         case INDEX_op_setcond_i64:
+//             // tci_args_rrrc(insn, &r0, &r1, &r2, &condition);
+//             // regs[r0] = tci_compare64(regs[r1], regs[r2], condition);
+//             break;
+//         case INDEX_op_movcond_i64:
+//             // tci_args_rrrrrc(insn, &r0, &r1, &r2, &r3, &r4, &condition);
+//             // tmp32 = tci_compare64(regs[r1], regs[r2], condition);
+//             // regs[r0] = regs[tmp32 ? r3 : r4];
+//             break;
+// #endif
+//         CASE_32_64(mov)
+//             puts("mov");
+//             // tci_args_rr(insn, &r0, &r1);
+//             // regs[r0] = regs[r1];
+//             break;
+//         // case INDEX_op_tci_movi:
+//         //     puts("mov");
+//         //     // tci_args_ri(insn, &r0, &t1);
+//         //     // regs[r0] = t1;
+//         //     break;
+//         // case INDEX_op_tci_movl:
+//         //     puts("mov");
+//         //     // tci_args_rl(insn, tb_ptr, &r0, &ptr);
+//         //     // regs[r0] = *(tcg_target_ulong *)ptr;
+//         //     break;
+
+//             /* Load/store operations (32 bit). */
+
+//         CASE_32_64(ld8u)
+//             // tci_args_rrs(insn, &r0, &r1, &ofs);
+//             // ptr = (void *)(regs[r1] + ofs);
+//             // regs[r0] = *(uint8_t *)ptr;
+//             break;
+//         CASE_32_64(ld8s)
+//             // tci_args_rrs(insn, &r0, &r1, &ofs);
+//             // ptr = (void *)(regs[r1] + ofs);
+//             // regs[r0] = *(int8_t *)ptr;
+//             break;
+//         CASE_32_64(ld16u)
+//             // tci_args_rrs(insn, &r0, &r1, &ofs);
+//             // ptr = (void *)(regs[r1] + ofs);
+//             // regs[r0] = *(uint16_t *)ptr;
+//             break;
+//         CASE_32_64(ld16s)
+//             // tci_args_rrs(insn, &r0, &r1, &ofs);
+//             // ptr = (void *)(regs[r1] + ofs);
+//             // regs[r0] = *(int16_t *)ptr;
+//             break;
+//         case INDEX_op_ld_i32:
+//             puts("INDEX_op_ld_i32");
+//         CASE_64(ld32u)
+//             // tci_args_rrs(insn, &r0, &r1, &ofs);
+//             // ptr = (void *)(regs[r1] + ofs);
+//             // regs[r0] = *(uint32_t *)ptr;
+//             break;
+//         CASE_32_64(st8)
+//             // tci_args_rrs(insn, &r0, &r1, &ofs);
+//             // ptr = (void *)(regs[r1] + ofs);
+//             // *(uint8_t *)ptr = regs[r0];
+//             break;
+//         CASE_32_64(st16)
+//             // tci_args_rrs(insn, &r0, &r1, &ofs);
+//             // ptr = (void *)(regs[r1] + ofs);
+//             // *(uint16_t *)ptr = regs[r0];
+//             break;
+//         case INDEX_op_st_i32:
+//             puts("INDEX_op_st_i32");
+//         CASE_64(st32)
+//             // tci_args_rrs(insn, &r0, &r1, &ofs);
+//             // ptr = (void *)(regs[r1] + ofs);
+//             // *(uint32_t *)ptr = regs[r0];
+//             break;
+
+//             /* Arithmetic operations (mixed 32/64 bit). */
+
+//         CASE_32_64(add)
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = regs[r1] + regs[r2];
+//             break;
+//         CASE_32_64(sub)
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = regs[r1] - regs[r2];
+//             break;
+//         CASE_32_64(mul)
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = regs[r1] * regs[r2];
+//             break;
+//         CASE_32_64(and)
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = regs[r1] & regs[r2];
+//             break;
+//         CASE_32_64(or)
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = regs[r1] | regs[r2];
+//             break;
+//         CASE_32_64(xor)
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = regs[r1] ^ regs[r2];
+//             break;
+// // #if TCG_TARGET_HAS_andc_i32 || TCG_TARGET_HAS_andc_i64
+// //         CASE_32_64(andc)
+// //             // tci_args_rrr(insn, &r0, &r1, &r2);
+// //             // regs[r0] = regs[r1] & ~regs[r2];
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_orc_i32 || TCG_TARGET_HAS_orc_i64
+// //         CASE_32_64(orc)
+// //             // tci_args_rrr(insn, &r0, &r1, &r2);
+// //             // regs[r0] = regs[r1] | ~regs[r2];
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_eqv_i32 || TCG_TARGET_HAS_eqv_i64
+// //         CASE_32_64(eqv)
+// //             // tci_args_rrr(insn, &r0, &r1, &r2);
+// //             // regs[r0] = ~(regs[r1] ^ regs[r2]);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_nand_i32 || TCG_TARGET_HAS_nand_i64
+// //         CASE_32_64(nand)
+// //             // tci_args_rrr(insn, &r0, &r1, &r2);
+// //             // regs[r0] = ~(regs[r1] & regs[r2]);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_nor_i32 || TCG_TARGET_HAS_nor_i64
+// //         CASE_32_64(nor)
+// //             // tci_args_rrr(insn, &r0, &r1, &r2);
+// //             // regs[r0] = ~(regs[r1] | regs[r2]);
+// //             break;
+// // #endif
+
+//             /* Arithmetic operations (32 bit). */
+
+//         case INDEX_op_div_i32:
+//             puts("div");
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = (int32_t)regs[r1] / (int32_t)regs[r2];
+//             break;
+//         case INDEX_op_divu_i32:
+//             puts("div");
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = (uint32_t)regs[r1] / (uint32_t)regs[r2];
+//             break;
+//         case INDEX_op_rem_i32:
+//             puts("rem");
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = (int32_t)regs[r1] % (int32_t)regs[r2];
+//             break;
+//         case INDEX_op_remu_i32:
+//             puts("rem");
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = (uint32_t)regs[r1] % (uint32_t)regs[r2];
+//             break;
+// // #if TCG_TARGET_HAS_clz_i32
+// //         case INDEX_op_clz_i32:
+// //             // tci_args_rrr(insn, &r0, &r1, &r2);
+// //             // tmp32 = regs[r1];
+// //             // regs[r0] = tmp32 ? clz32(tmp32) : regs[r2];
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_ctz_i32
+// //         case INDEX_op_ctz_i32:
+// //             // tci_args_rrr(insn, &r0, &r1, &r2);
+// //             // tmp32 = regs[r1];
+// //             // regs[r0] = tmp32 ? ctz32(tmp32) : regs[r2];
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_ctpop_i32
+// //         case INDEX_op_ctpop_i32:
+// //             // tci_args_rr(insn, &r0, &r1);
+// //             // regs[r0] = ctpop32(regs[r1]);
+// //             break;
+// // #endif
+
+//             /* Shift/rotate operations (32 bit). */
+
+//         case INDEX_op_shl_i32:
+//             puts("shl");
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = (uint32_t)regs[r1] << (regs[r2] & 31);
+//             break;
+//         case INDEX_op_shr_i32:
+//             puts("shr");
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = (uint32_t)regs[r1] >> (regs[r2] & 31);
+//             break;
+//         case INDEX_op_sar_i32:
+//             puts("sar");
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = (int32_t)regs[r1] >> (regs[r2] & 31);
+//             break;
+// // #if TCG_TARGET_HAS_rot_i32
+// //         case INDEX_op_rotl_i32:
+// //             puts("rotl");
+// //             // tci_args_rrr(insn, &r0, &r1, &r2);
+// //             // regs[r0] = rol32(regs[r1], regs[r2] & 31);
+// //             break;
+// //         case INDEX_op_rotr_i32:
+// //             puts("rotr");
+// //             // tci_args_rrr(insn, &r0, &r1, &r2);
+// //             // regs[r0] = ror32(regs[r1], regs[r2] & 31);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_deposit_i32
+// //         case INDEX_op_deposit_i32:
+
+// //             // tci_args_rrrbb(insn, &r0, &r1, &r2, &pos, &len);
+// //             // regs[r0] = deposit32(regs[r1], pos, len, regs[r2]);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_extract_i32
+// //         case INDEX_op_extract_i32:
+// //             // tci_args_rrbb(insn, &r0, &r1, &pos, &len);
+// //             // regs[r0] = extract32(regs[r1], pos, len);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_sextract_i32
+// //         case INDEX_op_sextract_i32:
+// //             // tci_args_rrbb(insn, &r0, &r1, &pos, &len);
+// //             // regs[r0] = sextract32(regs[r1], pos, len);
+// //             break;
+// // #endif
+//         case INDEX_op_brcond_i32:
+//             puts("brcond");
+//             // tci_args_rl(insn, tb_ptr, &r0, &ptr);
+//             // if ((uint32_t)regs[r0]) {
+//             //     tb_ptr = ptr;
+//             // }
+//             break;
+// // #if TCG_TARGET_REG_BITS == 32 || TCG_TARGET_HAS_add2_i32
+// //         case INDEX_op_add2_i32:
+// //             puts("add2");
+// //             // tci_args_rrrrrr(insn, &r0, &r1, &r2, &r3, &r4, &r5);
+// //             // T1 = tci_uint64(regs[r3], regs[r2]);
+// //             // T2 = tci_uint64(regs[r5], regs[r4]);
+// //             // tci_write_reg64(regs, r1, r0, T1 + T2);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_REG_BITS == 32 || TCG_TARGET_HAS_sub2_i32
+// //         case INDEX_op_sub2_i32:
+// //             puts("sub2");
+// //             // tci_args_rrrrrr(insn, &r0, &r1, &r2, &r3, &r4, &r5);
+// //             // T1 = tci_uint64(regs[r3], regs[r2]);
+// //             // T2 = tci_uint64(regs[r5], regs[r4]);
+// //             // tci_write_reg64(regs, r1, r0, T1 - T2);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_mulu2_i32
+// //         case INDEX_op_mulu2_i32:
+// //             puts("mulu2");
+// //             // tci_args_rrrr(insn, &r0, &r1, &r2, &r3);
+// //             // tmp64 = (uint64_t)(uint32_t)regs[r2] * (uint32_t)regs[r3];
+// //             // tci_write_reg64(regs, r1, r0, tmp64);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_muls2_i32
+// //         case INDEX_op_muls2_i32:
+// //             // tci_args_rrrr(insn, &r0, &r1, &r2, &r3);
+// //             // tmp64 = (int64_t)(int32_t)regs[r2] * (int32_t)regs[r3];
+// //             // tci_write_reg64(regs, r1, r0, tmp64);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_ext8s_i32 || TCG_TARGET_HAS_ext8s_i64
+// //         CASE_32_64(ext8s)
+// //             // tci_args_rr(insn, &r0, &r1);
+// //             // regs[r0] = (int8_t)regs[r1];
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_ext16s_i32 || TCG_TARGET_HAS_ext16s_i64 || TCG_TARGET_HAS_bswap16_i32 || TCG_TARGET_HAS_bswap16_i64
+// //         CASE_32_64(ext16s)
+// //             // tci_args_rr(insn, &r0, &r1);
+// //             // regs[r0] = (int16_t)regs[r1];
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_ext8u_i32 || TCG_TARGET_HAS_ext8u_i64
+// //         CASE_32_64(ext8u)
+// //             // tci_args_rr(insn, &r0, &r1);
+// //             // regs[r0] = (uint8_t)regs[r1];
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_ext16u_i32 || TCG_TARGET_HAS_ext16u_i64
+// //         CASE_32_64(ext16u)
+// //             // tci_args_rr(insn, &r0, &r1);
+// //             // regs[r0] = (uint16_t)regs[r1];
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_bswap16_i32 || TCG_TARGET_HAS_bswap16_i64
+// //         CASE_32_64(bswap16)
+// //             // tci_args_rr(insn, &r0, &r1);
+// //             // regs[r0] = bswap16(regs[r1]);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_bswap32_i32 || TCG_TARGET_HAS_bswap32_i64
+// //         CASE_32_64(bswap32)
+// //             // tci_args_rr(insn, &r0, &r1);
+// //             // regs[r0] = bswap32(regs[r1]);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_not_i32 || TCG_TARGET_HAS_not_i64
+// //         CASE_32_64(not)
+// //             // tci_args_rr(insn, &r0, &r1);
+// //             // regs[r0] = ~regs[r1];
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_neg_i32 || TCG_TARGET_HAS_neg_i64
+// //         CASE_32_64(neg)
+// //             // tci_args_rr(insn, &r0, &r1);
+// //             // regs[r0] = -regs[r1];
+// //             break;
+// // #endif
+// #if TCG_TARGET_REG_BITS == 64
+//             /* Load/store operations (64 bit). */
+
+//         case INDEX_op_ld32s_i64:
+//             puts("ld32s");
+//             // tci_args_rrs(insn, &r0, &r1, &ofs);
+//             // ptr = (void *)(regs[r1] + ofs);
+//             // regs[r0] = *(int32_t *)ptr;
+//             break;
+//         case INDEX_op_ld_i64:
+//             puts("ld");
+//             // tci_args_rrs(insn, &r0, &r1, &ofs);
+//             // ptr = (void *)(regs[r1] + ofs);
+//             // regs[r0] = *(uint64_t *)ptr;
+//             break;
+//         case INDEX_op_st_i64:
+//             puts("st");
+//             // tci_args_rrs(insn, &r0, &r1, &ofs);
+//             // ptr = (void *)(regs[r1] + ofs);
+//             // *(uint64_t *)ptr = regs[r0];
+//             break;
+
+//             /* Arithmetic operations (64 bit). */
+
+//         case INDEX_op_div_i64:
+//             puts("INDEX_op_div_i64");
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = (int64_t)regs[r1] / (int64_t)regs[r2];
+//             break;
+//         case INDEX_op_divu_i64:
+//             puts("INDEX_op_divu_i64");
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = (uint64_t)regs[r1] / (uint64_t)regs[r2];
+//             break;
+//         case INDEX_op_rem_i64:
+//             puts("INDEX_op_rem_i64");
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = (int64_t)regs[r1] % (int64_t)regs[r2];
+//             break;
+//         case INDEX_op_remu_i64:
+//             puts("INDEX_op_remu_i64");
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = (uint64_t)regs[r1] % (uint64_t)regs[r2];
+//             break;
+// // #if TCG_TARGET_HAS_clz_i64
+// //         case INDEX_op_clz_i64:
+// //             // tci_args_rrr(insn, &r0, &r1, &r2);
+// //             // regs[r0] = regs[r1] ? clz64(regs[r1]) : regs[r2];
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_ctz_i64
+// //         case INDEX_op_ctz_i64:
+// //             // tci_args_rrr(insn, &r0, &r1, &r2);
+// //             // regs[r0] = regs[r1] ? ctz64(regs[r1]) : regs[r2];
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_ctpop_i64
+// //         case INDEX_op_ctpop_i64:
+// //             // tci_args_rr(insn, &r0, &r1);
+// //             // regs[r0] = ctpop64(regs[r1]);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_mulu2_i64
+// //         case INDEX_op_mulu2_i64:
+// //             puts("INDEX_op_mulu2_i64");
+// //             // tci_args_rrrr(insn, &r0, &r1, &r2, &r3);
+// //             // mulu64(&regs[r0], &regs[r1], regs[r2], regs[r3]);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_muls2_i64
+// //         case INDEX_op_muls2_i64:
+// //             puts("INDEX_op_muls2_i64");
+// //             // tci_args_rrrr(insn, &r0, &r1, &r2, &r3);
+// //             // muls64(&regs[r0], &regs[r1], regs[r2], regs[r3]);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_add2_i64
+// //         case INDEX_op_add2_i64:
+// //             puts("INDEX_op_add2_i64");
+// //             // tci_args_rrrrrr(insn, &r0, &r1, &r2, &r3, &r4, &r5);
+// //             // T1 = regs[r2] + regs[r4];
+// //             // T2 = regs[r3] + regs[r5] + (T1 < regs[r2]);
+// //             // regs[r0] = T1;
+// //             // regs[r1] = T2;
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_add2_i64
+// //         case INDEX_op_sub2_i64:
+// //             // tci_args_rrrrrr(insn, &r0, &r1, &r2, &r3, &r4, &r5);
+// //             // T1 = regs[r2] - regs[r4];
+// //             // T2 = regs[r3] - regs[r5] - (regs[r2] < regs[r4]);
+// //             // regs[r0] = T1;
+// //             // regs[r1] = T2;
+// //             break;
+// // #endif
+
+//             /* Shift/rotate operations (64 bit). */
+
+//         case INDEX_op_shl_i64:
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = regs[r1] << (regs[r2] & 63);
+//             break;
+//         case INDEX_op_shr_i64:
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = regs[r1] >> (regs[r2] & 63);
+//             break;
+//         case INDEX_op_sar_i64:
+//             // tci_args_rrr(insn, &r0, &r1, &r2);
+//             // regs[r0] = (int64_t)regs[r1] >> (regs[r2] & 63);
+//             break;
+// // #if TCG_TARGET_HAS_rot_i64
+// //         case INDEX_op_rotl_i64:
+// //             // tci_args_rrr(insn, &r0, &r1, &r2);
+// //             // regs[r0] = rol64(regs[r1], regs[r2] & 63);
+// //             break;
+// //         case INDEX_op_rotr_i64:
+// //             // tci_args_rrr(insn, &r0, &r1, &r2);
+// //             // regs[r0] = ror64(regs[r1], regs[r2] & 63);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_deposit_i64
+// //         case INDEX_op_deposit_i64:
+// //             // tci_args_rrrbb(insn, &r0, &r1, &r2, &pos, &len);
+// //             // regs[r0] = deposit64(regs[r1], pos, len, regs[r2]);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_extract_i64
+// //         case INDEX_op_extract_i64:
+// //             // tci_args_rrbb(insn, &r0, &r1, &pos, &len);
+// //             // regs[r0] = extract64(regs[r1], pos, len);
+// //             break;
+// // #endif
+// // #if TCG_TARGET_HAS_sextract_i64
+// //         case INDEX_op_sextract_i64:
+// //             // tci_args_rrbb(insn, &r0, &r1, &pos, &len);
+// //             // regs[r0] = sextract64(regs[r1], pos, len);
+// //             break;
+// // #endif
+//         case INDEX_op_brcond_i64:
+//             // tci_args_rl(insn, tb_ptr, &r0, &ptr);
+//             // if (regs[r0]) {
+//             //     tb_ptr = ptr;
+//             // }
+//             break;
+//         case INDEX_op_ext32s_i64:
+//         case INDEX_op_ext_i32_i64:
+//             // tci_args_rr(insn, &r0, &r1);
+//             // regs[r0] = (int32_t)regs[r1];
+//             break;
+//         case INDEX_op_ext32u_i64:
+//         case INDEX_op_extu_i32_i64:
+//             // tci_args_rr(insn, &r0, &r1);
+//             // regs[r0] = (uint32_t)regs[r1];
+//             break;
+// // #if TCG_TARGET_HAS_bswap64_i64
+// //         case INDEX_op_bswap64_i64:
+// //             // tci_args_rr(insn, &r0, &r1);
+// //             // regs[r0] = bswap64(regs[r1]);
+// //             break;
+// // #endif
+// #endif /* TCG_TARGET_REG_BITS == 64 */
+
+//             /* QEMU specific operations. */
+
+        // case INDEX_op_exit_tb:
+//             // tci_args_l(insn, tb_ptr, &ptr);
+//             // return (uintptr_t)ptr;
+            // return 0;
+
+//         case INDEX_op_goto_tb:
+//             // tci_args_l(insn, tb_ptr, &ptr);
+//             // tb_ptr = *(void **)ptr;
+//             break;
+
+//         case INDEX_op_goto_ptr:
+//             // tci_args_r(insn, &r0);
+//             // ptr = (void *)regs[r0];
+//             // if (!ptr) {
+//             //     return 0;
+//             // }
+//             // tb_ptr = ptr;
+//             break;
+
+//         case INDEX_op_qemu_ld_i32:
+//             // if (TARGET_LONG_BITS <= TCG_TARGET_REG_BITS) {
+//             //     tci_args_rrm(insn, &r0, &r1, &oi);
+//             //     taddr = regs[r1];
+//             // } else {
+//             //     tci_args_rrrm(insn, &r0, &r1, &r2, &oi);
+//             //     taddr = tci_uint64(regs[r2], regs[r1]);
+//             // }
+//             // tmp32 = tci_qemu_ld(env, taddr, oi, tb_ptr);
+//             // regs[r0] = tmp32;
+//             break;
+
+//         case INDEX_op_qemu_ld_i64:
+//             // if (TCG_TARGET_REG_BITS == 64) {
+//             //     tci_args_rrm(insn, &r0, &r1, &oi);
+//             //     taddr = regs[r1];
+//             // } else if (TARGET_LONG_BITS <= TCG_TARGET_REG_BITS) {
+//             //     tci_args_rrrm(insn, &r0, &r1, &r2, &oi);
+//             //     taddr = regs[r2];
+//             // } else {
+//             //     tci_args_rrrrr(insn, &r0, &r1, &r2, &r3, &r4);
+//             //     taddr = tci_uint64(regs[r3], regs[r2]);
+//             //     oi = regs[r4];
+//             // }
+//             // tmp64 = tci_qemu_ld(env, taddr, oi, tb_ptr);
+//             // if (TCG_TARGET_REG_BITS == 32) {
+//             //     tci_write_reg64(regs, r1, r0, tmp64);
+//             // } else {
+//             //     regs[r0] = tmp64;
+//             // }
+//             break;
+
+//         case INDEX_op_qemu_st_i32:
+//             // if (TARGET_LONG_BITS <= TCG_TARGET_REG_BITS) {
+//             //     tci_args_rrm(insn, &r0, &r1, &oi);
+//             //     taddr = regs[r1];
+//             // } else {
+//             //     tci_args_rrrm(insn, &r0, &r1, &r2, &oi);
+//             //     taddr = tci_uint64(regs[r2], regs[r1]);
+//             // }
+//             // tmp32 = regs[r0];
+//             // tci_qemu_st(env, taddr, tmp32, oi, tb_ptr);
+//             break;
+
+//         case INDEX_op_qemu_st_i64:
+//             // if (TCG_TARGET_REG_BITS == 64) {
+//             //     tci_args_rrm(insn, &r0, &r1, &oi);
+//             //     taddr = regs[r1];
+//             //     tmp64 = regs[r0];
+//             // } else {
+//             //     if (TARGET_LONG_BITS <= TCG_TARGET_REG_BITS) {
+//             //         tci_args_rrrm(insn, &r0, &r1, &r2, &oi);
+//             //         taddr = regs[r2];
+//             //     } else {
+//             //         tci_args_rrrrr(insn, &r0, &r1, &r2, &r3, &r4);
+//             //         taddr = tci_uint64(regs[r3], regs[r2]);
+//             //         oi = regs[r4];
+//             //     }
+//             //     tmp64 = tci_uint64(regs[r1], regs[r0]);
+//             // }
+//             // tci_qemu_st(env, taddr, tmp64, oi, tb_ptr);
+//             break;
+
+//         case INDEX_op_mb:
+//             /* Ensure ordering for all kinds */
+//             smp_mb();
+//             break;
+//         case INDEX_op_dup_vec:
+//             puts("INDEX_op_dup_vec");
+//             break;
+//         default:
+//             // g_assert_not_reached();
+//             if(once) {
+//                 once = false;
+//                 continue;
+//             }
+//             return 0;
+//             // continue;
+        // }
+        // puts("");
+    }
+    return 0;
+}
+#endif
+// =====================================================
+
+
+
+
+
 /* Execute a TB, and fix up the CPU state afterwards if necessary */
 /*
  * Disable CFI checks.
@@ -355,7 +1148,33 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     log_cpu_exec(itb->pc, cpu, itb);
 
     qemu_thread_jit_execute();
+    // printf("eip: 0x%lx \n", (unsigned long)env->eip);
+    /// REF: https://github.com/geohot/qira/blob/master/extra/qemu_mods/tci.c#L1007
+    // printf("tb->tc.ptr[0]: opcode: %d\n", ((uint8_t *)(tb_ptr))[0]);
+    // printf("test INDEX_op_mov_i32: %d\n", INDEX_op_dup_vec);
+    
+    // uint32_t insn;
+    // const uint32_t* hyt_test_tp_ptr = tb_ptr;
+    // ++hyt_test_tp_ptr;
+    // ++hyt_test_tp_ptr;
+    // ++hyt_test_tp_ptr;
+    // insn = *(++hyt_test_tp_ptr);
+    // TCGOpcode opc = extract32(insn, 0, 8);
+    // // puts("test");
+    // if(opc != INDEX_op_dup_vec) {
+    //     puts("not equal");
+    //     printf("now opc is: %d", (uint32_t)opc);
+    // }
+
+    // printf("%d\n", INDEX_op_x86_vpshrdv_vec);
+#ifdef HYT_TEST_IR_COED
+    hyt_test_IR_code(env, tb_ptr);
+#endif
     ret = tcg_qemu_tb_exec(env, tb_ptr);
+    // tcg_target_ulong regs[TCG_TARGET_NB_REGS];
+    // regs[TCG_AREG0] = (tcg_target_ulong)env;
+    // printf("ret value 0x%lx \n", (unsigned long)(regs[TCG_AREG0]));
+
     cpu->can_do_io = 1;
     /*
      * TODO: Delay swapping back to the read-write region of the TB
@@ -723,6 +1542,9 @@ static inline bool need_replay_interrupt(int interrupt_request)
 static inline bool cpu_handle_interrupt(CPUState *cpu,
                                         TranslationBlock **last_tb)
 {
+
+
+
     /*
      * If we have requested custom cflags with CF_NOIRQ we should
      * skip checking here. Any pending interrupts will get picked up
@@ -886,7 +1708,18 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
     }
 #endif
 }
+// #define HYT_TEST_OUT
+// #ifdef HYT_TEST_OUT
+// #include "../../target/i386/cpu.h"
+// #endif 
 
+// ================== HYT ADDED =================
+#define HYT_INSTRUMENT
+#ifdef HYT_INSTRUMENT
+#include "../../target/i386/tcg/hyt-tcg-instrumenting.h"
+bool needInstrumenting = false;
+#endif
+// ==============================================
 /* main execution loop */
 
 int cpu_exec(CPUState *cpu)
@@ -946,17 +1779,38 @@ int cpu_exec(CPUState *cpu)
         assert_no_pages_locked();
     }
 
+// ================== HYT ADDED =================
+#ifdef HYT_INSTRUMENT
+    bool needInstrumenting = false;
+    bool firstFound = false;
+#endif
+// ==============================================
     /* if an exception is pending, we execute it here */
     while (!cpu_handle_exception(cpu, &ret)) {
         TranslationBlock *last_tb = NULL;
         int tb_exit = 0;
-
+// ================== HYT ADDED =================
+#ifdef HYT_INSTRUMENT
+        if(needInstrumenting) {
+            return INSTRUMENT;
+        }
+#endif
+// =============================================
         while (!cpu_handle_interrupt(cpu, &last_tb)) {
             TranslationBlock *tb;
             target_ulong cs_base, pc;
             uint32_t flags, cflags;
-
+            // printf("0x%lx \n", (uint32_t)pc);
             cpu_get_tb_cpu_state(cpu->env_ptr, &pc, &cs_base, &flags);
+// ================== HYT ADDED =================
+#ifdef HYT_INSTRUMENT
+            if(strcmp("test", lookup_symbol(pc)) && !firstFound) {
+                needInstrumenting = true;
+                firstFound = true;
+                break;
+            }
+#endif
+// =============================================
 
             /*
              * When requested, use an exact setting for cflags for the next
@@ -1003,8 +1857,16 @@ int cpu_exec(CPUState *cpu)
             if (last_tb) {
                 tb_add_jump(last_tb, tb_exit, tb);
             }
-
-            cpu_loop_exec_tb(cpu, tb, &last_tb, &tb_exit);
+            
+            /// KEY:
+            // puts("HYT do cpu_loop_exec_tb");
+            // printf("tb->tc.ptr[0]: opcode: %d\n", ((uint8_t *)(tb->tc.ptr))[0]);
+            // printf("Rax 0x%lx\n", (unsigned long)(cpu->env_ptr->regs[REG_RAX]));
+            cpu_loop_exec_tb(cpu, tb, &last_tb, &tb_exit); 
+            // X86CPU *cpu_x86 = X86_CPU(cpu);
+            // CPUX86State *env = &cpu_x86->env;
+            // CPUArchState *env = cpu->env_ptr;
+            // printf("Rax 0x%lx\n", (unsigned long)(env->regs[0]));
 
             /* Try to align the host and virtual clocks
                if the guest is in advance */

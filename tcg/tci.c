@@ -467,6 +467,7 @@ static void tci_qemu_st(CPUArchState *env, target_ulong taddr, uint64_t val,
 uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
                                             const void *v_tb_ptr)
 {
+    // puts("IS procesed");
     const uint32_t *tb_ptr = v_tb_ptr;
     tcg_target_ulong regs[TCG_TARGET_NB_REGS];
     uint64_t stack[(TCG_STATIC_CALL_ARGS_SIZE + TCG_STATIC_FRAME_SIZE)

@@ -137,16 +137,29 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
     tb->icount = db->num_insns;
 
 #ifdef DEBUG_DISAS
-    if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)
-        && qemu_log_in_addr_range(db->pc_first)) {
-        FILE *logfile = qemu_log_trylock();
-        if (logfile) {
-            fprintf(logfile, "----------------\n");
-            ops->disas_log(db, cpu, logfile);
-            fprintf(logfile, "\n");
-            qemu_log_unlock(logfile);
-        }
+    FILE *logfile = fopen("/seagate/hyt/binary-sim/test/env_regs_test/logfile/guest_disas_log.txt", "a");
+    if (logfile) {
+        fprintf(logfile, "----------------\n");
+        ops->disas_log(db, cpu, logfile);
+        fprintf(logfile, "\n");
+        // qemu_log_unlock(logfile);
+        fclose(logfile);
     }
+
+    // if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)
+    //     && qemu_log_in_addr_range(db->pc_first)) {
+    //         // puts("debug_disas");
+    //     FILE *logfile = qemu_log_trylock();
+    //     // FILE *logfile = fopen("/seagate/hyt/binary-sim/test/env_regs_test/disas_log.txt", "a");
+    //     if (logfile) {
+    //         fprintf(logfile, "----------------\n");
+    //         ops->disas_log(db, cpu, logfile);
+    //         fprintf(logfile, "\n");
+    //         qemu_log_unlock(logfile);
+    //         // fclose(logfile);
+    //     }
+        
+    // }
 #endif
 }
 
